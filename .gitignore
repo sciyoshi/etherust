@@ -1,0 +1,7 @@
+*.dylib
+*.rlib
+*.so
+*.o
+
+Cargo.lock
+target/

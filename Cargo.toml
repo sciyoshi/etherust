@@ -1,0 +1,10 @@
+[package]
+name = "etherust"
+version = "0.1.0"
+authors = ["Samuel Cormier-Iijima <sciyoshi@gmail.com>"]
+
+[dependencies]
+secp256k1 = "0.*"
+rand = "0.*"
+byteorder = "0.*"
+rust-crypto = "0.*"
