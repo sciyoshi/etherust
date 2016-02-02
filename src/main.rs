@@ -16,7 +16,7 @@ use crypto::symmetriccipher::{Encryptor, Decryptor};
 use crypto::{sha2, sha3, aes, mac, hmac};
 
 use etherust::rlpx;
-use etherust::crypto::concat_kdf;
+use etherust::crypto::KeyDerivation;
 
 fn message_tag<D: Digest>(hasher: D, key: &[u8], msg: &[u8]) -> mac::MacResult {
 	let mut hmac = hmac::Hmac::new(hasher, key);
@@ -63,7 +63,7 @@ fn encrypt<R: Rng>(rng: &mut R, secp: &secp256k1::Secp256k1, pubkey: &secp256k1:
 
 	let mut hasher = sha2::Sha256::new();
 
-	let k = concat_kdf(&mut hasher, &shared[..], &[] /* s1 */, 2 * keylen);
+	let k = hasher.concat_kdf(&shared[..], &[] /* s1 */, 2 * keylen);
 
 	let ke = &k[..keylen];
 	let km = &k[keylen..];
@@ -111,7 +111,7 @@ fn decrypt<R: Rng>(rng: &mut R, secp: &secp256k1::Secp256k1, privkey: &secp256k1
 
 	println!("shared: {:?}", &shared[..]);
 
-	let k = concat_kdf(&mut hasher, &shared[..], &[] /* s1 */, 2 * keylen);
+	let k = hasher.concat_kdf(&shared[..], &[] /* s1 */, 2 * keylen);
 
 	println!("K: {:?}", &k);
 
