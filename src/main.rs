@@ -16,126 +16,7 @@ use crypto::symmetriccipher::{Encryptor, Decryptor};
 use crypto::{sha2, sha3, aes, mac, hmac};
 
 use etherust::rlpx;
-use etherust::crypto::KeyDerivation;
-
-fn message_tag<D: Digest>(hasher: D, key: &[u8], msg: &[u8]) -> mac::MacResult {
-	let mut hmac = hmac::Hmac::new(hasher, key);
-
-	hmac.input(msg);
-
-	hmac.result()
-}
-
-fn sym_encrypt<R: Rng>(rng: &mut R, key: &[u8], msg: &[u8]) -> Vec<u8> {
-	let mut iv = vec![0u8; 16];
-	let mut ciphertext = vec![0u8; msg.len()];
-
-	rng.fill_bytes(&mut iv);
-
-	let mut aes = aes::ctr(aes::KeySize::KeySize128, key, &iv);
-
-	aes.process(msg, &mut ciphertext);
-
-	let mut result: Vec<u8> = Vec::new();
-
-	result.extend_from_slice(&iv);
-	result.extend_from_slice(&ciphertext);
-
-	result
-}
-
-fn sym_decrypt(key: &[u8], ciphertext: &[u8]) -> Vec<u8> {
-	let mut aes = aes::ctr(aes::KeySize::KeySize128, key, &ciphertext[..16]);
-
-	let mut result = vec![0u8; ciphertext.len() - 16];
-
-	aes.process(&ciphertext[16..], &mut result);
-
-	result
-}
-
-fn encrypt<R: Rng>(rng: &mut R, secp: &secp256k1::Secp256k1, pubkey: &secp256k1::key::PublicKey, msg: &[u8]) -> Vec<u8> {
-	let (eprivkey, epubkey) = secp.generate_keypair(rng).unwrap();
-
-	let shared = secp256k1::ecdh::SharedSecret::new_raw(&secp, pubkey, &eprivkey);
-
-	let keylen = 16;
-
-	let mut hasher = sha2::Sha256::new();
-
-	let k = hasher.concat_kdf(&shared[..], &[] /* s1 */, 2 * keylen);
-
-	let ke = &k[..keylen];
-	let km = &k[keylen..];
-	let mut kmhash = [0u8; 32];
-
-	hasher.input(&km);
-	hasher.result(&mut kmhash);
-	hasher.reset();
-
-	let enc = sym_encrypt(rng, &ke, msg);
-
-	let tag = message_tag(hasher, &kmhash, &enc /*, s2 */);
-
-	/*
-	println!("shared: {:?}", &shared[..]);
-	println!("pub: {:?}", &epubkey.serialize_vec(&secp, false));
-	println!("priv: {:?}", eprivkey);
-	println!("kmhash: {:?}", &kmhash);
-	println!("ENC: {:?}", &enc);
-	println!("TAG: {:?}", &tag.code());
-	*/
-
-	let mut result = vec![0u8; 0];
-
-	result.extend_from_slice(&epubkey.serialize_vec(&secp, false));
-	result.extend_from_slice(&enc);
-	result.extend_from_slice(&tag.code());
-
-	result
-}
-
-fn decrypt<R: Rng>(rng: &mut R, secp: &secp256k1::Secp256k1, privkey: &secp256k1::key::SecretKey, msg: &[u8]) -> Vec<u8> {
-	let rlen = 65;
-	let keylen = 16;
-	let msglen = msg.len();
-	let hashlen = 32;
-
-	let epubkey = secp256k1::key::PublicKey::from_slice(secp, &msg[..rlen]).unwrap();
-
-	println!("epub: {:?}", &epubkey.serialize_vec(&secp, false));
-
-	let shared = secp256k1::ecdh::SharedSecret::new_raw(&secp, &epubkey, privkey);
-
-	let mut hasher = sha2::Sha256::new();
-
-	println!("shared: {:?}", &shared[..]);
-
-	let k = hasher.concat_kdf(&shared[..], &[] /* s1 */, 2 * keylen);
-
-	println!("K: {:?}", &k);
-
-	let ke = &k[..keylen];
-	let km = &k[keylen..];
-	let mut kmhash = [0u8; 32];
-
-	hasher.input(&km);
-	hasher.result(&mut kmhash);
-	hasher.reset();
-
-	let tag = message_tag(hasher, &kmhash, &msg[rlen..msglen - hashlen] /*, s2 */);
-
-	let msgtag = &msg[msglen - hashlen..];
-
-	// check equality in const time
-
-	println!("EPUBKEY: {:?}", &epubkey.serialize_vec(&secp, false));
-	println!("KMHASH: {:?}", &kmhash);
-	println!("TAG: {:?}", &tag.code());
-	println!("MSGTAG: {:?}", msgtag);
-
-	sym_decrypt(&ke, &msg[rlen..msglen - hashlen])
-}
+use etherust::crypto::{KeyDerivation, EncryptionContext};
 
 fn main() {
 	let mut rng = rand::OsRng::new().unwrap();
@@ -193,7 +74,13 @@ fn main() {
 	println!("PUBKEY\n========\n{:?}", &pubkey.serialize_vec(&secp, false)[1..]);
 	println!("NONCE\n========\n{:?}", &nonce);
 
-	let encrypted = encrypt(&mut rng, &secp, &rpubkey, &msg);
+	let mut ctx = EncryptionContext {
+		curve: &secp,
+		privkey: &privkey,
+		pubkey: &rpubkey
+	};
+
+	let encrypted = ctx.encrypt(&msg);
 
 	let mut stream = TcpStream::connect("127.0.0.1:30303").unwrap();
 
@@ -207,7 +94,7 @@ fn main() {
 	println!("RES: {:?}", readres);
 	println!("READ: {:?}", &read[..]);
 
-	let authresp = decrypt(&mut rng, &secp, &privkey, &read[..]);
+	let authresp = ctx.decrypt(&read[..]);
 
 	let mut key = vec![4u8];
 
