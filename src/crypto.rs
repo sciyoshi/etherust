@@ -3,7 +3,6 @@ extern crate byteorder;
 extern crate secp256k1;
 extern crate crypto as rustcrypto;
 
-//use std::rc::Rc;
 use rand::{thread_rng, Rng};
 use byteorder::{BigEndian, ByteOrder};
 use rustcrypto::{aes, hmac};
@@ -49,7 +48,7 @@ pub struct EncryptionContext<'a> {
 }
 
 impl<'a> EncryptionContext<'a> {
-	pub fn encrypt(&mut self, msg: &[u8]) -> Vec<u8> {
+	pub fn encrypt(&self, msg: &[u8]) -> Vec<u8> {
 		let (eprivkey, epubkey) = self.curve.generate_keypair(&mut thread_rng()).unwrap();
 
 		let shared = secp256k1::ecdh::SharedSecret::new_raw(self.curve, self.pubkey, &eprivkey);
@@ -126,7 +125,7 @@ impl<'a> EncryptionContext<'a> {
 	}
 
 
-	fn sym_encrypt(&mut self, key: &[u8], msg: &[u8]) -> Vec<u8> {
+	fn sym_encrypt(&self, key: &[u8], msg: &[u8]) -> Vec<u8> {
 		let mut iv = vec![0u8; 16];
 		let mut ciphertext = vec![0u8; msg.len()];
 
