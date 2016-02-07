@@ -15,6 +15,14 @@ pub struct RlpxContext<'a> {
 	pub nonce: Vec<u8>
 }
 
+pub struct RlpxSecrets<D: Digest> {
+	pub aes_secret: Vec<u8>,
+	pub mac: Vec<u8>,
+	pub token: Vec<u8>,
+	pub egress_mac: D,
+	pub ingress_mac: D,
+}
+
 impl<'a> RlpxContext<'a> {
 	pub fn new(context: &'a EncryptionContext<'a>) -> Self {
 		let (randprivkey, randpubkey) = context.curve.generate_keypair(&mut thread_rng()).unwrap();
@@ -79,28 +87,47 @@ impl<'a> RlpxContext<'a> {
 		let remotenonce = &authresp[64..96];
 		let remotetoken = &authresp[96];
 
-		println!("REMOTERANDPUBKEY: {:?}", &remoterandpubkey.serialize_vec(self.context.curve, false));
+		let ecdhe_secret = secp256k1::ecdh::SharedSecret::new_raw(self.context.curve, &remoterandpubkey, &self.randprivkey);
 
-		let ecdheSecret = secp256k1::ecdh::SharedSecret::new_raw(self.context.curve, &remoterandpubkey, &self.randprivkey);
-		let mut sharedSecret = [0u8; 32];
+		let mut shared_secret = [0u8; 32];
+		let mut shared_tmp = [0u8; 32];
 
-		let mut sharedTmp = [0u8; 32];
-
-		println!("RNONCE\n========\n{:?}", &remotenonce);
+		let mut secrets = RlpxSecrets {
+			aes_secret: vec![0u8; 32],
+			mac: vec![0u8; 32],
+			token: vec![0u8; 32],
+			egress_mac: sha3::Sha3::keccak256(),
+			ingress_mac: sha3::Sha3::keccak256()
+		};
 
 		hasher.input(&remotenonce);
 		hasher.input(&self.nonce);
-		hasher.result(&mut sharedTmp);
+		hasher.result(&mut shared_tmp);
 		hasher.reset();
 
-		println!("STMP\n========\n{:?}", &sharedTmp);
-
-		hasher.input(&ecdheSecret[..]);
-		hasher.input(&sharedTmp);
-		hasher.result(&mut sharedSecret);
+		hasher.input(&ecdhe_secret[..]);
+		hasher.input(&shared_tmp);
+		hasher.result(&mut shared_secret);
 		hasher.reset();
 
-		println!("ecdheSecret: {:?}", &ecdheSecret[..]);
-		println!("sharedSecret: {:?}", &sharedSecret);
+		hasher.input(&ecdhe_secret[..]);
+		hasher.input(&shared_secret);
+		hasher.result(&mut secrets.aes_secret);
+		hasher.reset();
+
+		hasher.input(&ecdhe_secret[..]);
+		hasher.input(&secrets.aes_secret);
+		hasher.result(&mut secrets.mac);
+		hasher.reset();
+
+		hasher.input(&shared_secret);
+		hasher.result(&mut secrets.token);
+		hasher.reset();
+
+		println!("ecdhe_secret: {:?}", &ecdhe_secret[..]);
+		println!("shared_secret: {:?}", &shared_secret);
+		println!("aes_secret: {:?}", &secrets.aes_secret);
+		println!("mac: {:?}", &secrets.mac);
+		println!("token: {:?}", &secrets.token);
 	}
 }

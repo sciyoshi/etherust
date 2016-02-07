@@ -6,6 +6,7 @@ authors = ["Samuel Cormier-Iijima <sciyoshi@gmail.com>"]
 [dependencies]
 mio = "0.*"
 rand = "0.*"
+mioco = { git = "https://github.com/dpc/mioco" }
 secp256k1 = "0.*"
 byteorder = "0.*"
 rust-crypto = "0.*"
