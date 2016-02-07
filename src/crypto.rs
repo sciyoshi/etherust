@@ -41,6 +41,7 @@ impl<D> KeyDerivation for D where D: Digest {
 	}
 }
 
+#[derive(Debug)]
 pub struct EncryptionContext<'a> {
 	pub curve: &'a secp256k1::Secp256k1,
 	pub privkey: &'a secp256k1::key::SecretKey,

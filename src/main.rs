@@ -15,30 +15,51 @@ use etherust::crypto::EncryptionContext;
 
 #[derive(Debug)]
 enum PeerState {
-	Initializing
+	Initializing,
+	AuthHandshake
 }
 
 #[derive(Debug)]
-struct Peer {
+struct Peer<'a> {
 	pub stream: TcpStream,
+	pub rlpx: RlpxContext<'a>,
 	pub state: PeerState
 }
 
-impl Peer {
-	pub fn new(stream: TcpStream) -> Self {
+impl<'a> Peer<'a> {
+	pub fn new(ctx: &'a EncryptionContext, stream: TcpStream) -> Self {
+		let rlpx = RlpxContext::new(ctx);
+
 		Peer {
 			stream: stream,
+			rlpx: rlpx,
 			state: PeerState::Initializing
+		}
+	}
+
+	pub fn handle(&mut self, events: EventSet) {
+		match self.state {
+			PeerState::Initializing => {
+				self.stream.write(&self.rlpx.handshake());
+				self.state = PeerState::AuthHandshake;
+			},
+			PeerState::AuthHandshake => {
+				let mut read = [0u8; 210];
+
+				let readres = self.stream.read(&mut read);
+
+				println!("READ: {:?}", readres);
+			}
 		}
 	}
 }
 
-struct PeerHandler {
+struct PeerHandler<'a> {
 	pub counter: usize,
-	pub peers: HashMap<Token, Peer>
+	pub peers: HashMap<Token, Peer<'a>>
 }
 
-impl PeerHandler {
+impl<'a> PeerHandler<'a> {
 	pub fn new() -> Self {
 		PeerHandler {
 			counter: 0,
@@ -46,8 +67,8 @@ impl PeerHandler {
 		}
 	}
 
-	pub fn register_peer(&mut self, event_loop: &mut EventLoop<Self>, stream: TcpStream) {
-		let peer = Peer::new(stream);
+	pub fn register_peer(&mut self, event_loop: &mut EventLoop<Self>, context: &'a EncryptionContext<'a>, stream: TcpStream) {
+		let peer = Peer::new(context, stream);
 		let token = Token(self.counter);
 
 		self.counter += 1;
@@ -58,14 +79,15 @@ impl PeerHandler {
 	}
 }
 
-impl Handler for PeerHandler {
+impl<'a> Handler for PeerHandler<'a> {
 	type Timeout = ();
 	type Message = u32;
 
 	fn ready(&mut self, event_loop: &mut EventLoop<PeerHandler>, token: Token, events: EventSet) {
 		match self.peers.get_mut(&token) {
 			Some(peer) => {
-				println!("ready!, {:?} {:?}", events, peer);
+				println!("ready!, {:?}", events);
+				peer.handle(events);
 			},
 			None => {
 				panic!("received event for non-existent peer");
@@ -84,6 +106,12 @@ fn main() {
 
 	let rpubkey = secp256k1::key::PublicKey::from_slice(&secp, rpub).unwrap();
 
+	let ctx = EncryptionContext {
+		curve: &secp,
+		privkey: &privkey,
+		pubkey: &rpubkey
+	};
+
 	//////////////////////////////////
 
 	let mut event_loop = EventLoop::new().unwrap();
@@ -92,7 +120,7 @@ fn main() {
 
 	let stream = TcpStream::connect(&"127.0.0.1:30303".parse().unwrap()).unwrap();
 
-	peer_handler.register_peer(&mut event_loop, stream);
+	peer_handler.register_peer(&mut event_loop, &ctx, stream);
 
 	let _ = event_loop.run(&mut peer_handler);
 

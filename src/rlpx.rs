@@ -6,6 +6,7 @@ use rustcrypto::digest::Digest;
 use rustcrypto::sha3;
 use crypto::EncryptionContext;
 
+#[derive(Debug)]
 pub struct RlpxContext<'a> {
 	pub context: &'a EncryptionContext<'a>,
 	pub pubkey: secp256k1::key::PublicKey,
