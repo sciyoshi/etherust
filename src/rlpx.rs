@@ -19,8 +19,8 @@ pub struct RlpxSecrets<D: Digest> {
 	pub aes_secret: Vec<u8>,
 	pub mac: Vec<u8>,
 	pub token: Vec<u8>,
-	pub egress_mac: D,
-	pub ingress_mac: D,
+	pub egress_mac: Box<D>,
+	pub ingress_mac: Box<D>,
 }
 
 impl<'a> RlpxContext<'a> {
@@ -74,7 +74,7 @@ impl<'a> RlpxContext<'a> {
 		self.context.encrypt(&msg)
 	}
 
-	pub fn auth_handshake_decode(&self, msg: &[u8]) {
+	pub fn auth_handshake_decode(&self, msg: &[u8]) -> RlpxSecrets<sha3::Sha3> {
 		let mut hasher = sha3::Sha3::keccak256();
 		let authresp = self.context.decrypt(msg);
 
@@ -96,8 +96,8 @@ impl<'a> RlpxContext<'a> {
 			aes_secret: vec![0u8; 32],
 			mac: vec![0u8; 32],
 			token: vec![0u8; 32],
-			egress_mac: sha3::Sha3::keccak256(),
-			ingress_mac: sha3::Sha3::keccak256()
+			egress_mac: Box::new(sha3::Sha3::keccak256()),
+			ingress_mac: Box::new(sha3::Sha3::keccak256())
 		};
 
 		hasher.input(&remotenonce);
@@ -129,5 +129,7 @@ impl<'a> RlpxContext<'a> {
 		println!("aes_secret: {:?}", &secrets.aes_secret);
 		println!("mac: {:?}", &secrets.mac);
 		println!("token: {:?}", &secrets.token);
+
+		secrets
 	}
 }
