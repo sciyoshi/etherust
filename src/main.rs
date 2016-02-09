@@ -1,10 +1,10 @@
 extern crate mio;
 extern crate rand;
 extern crate mioco;
+extern crate crypto as rustcrypto;
 extern crate etherust;
 extern crate secp256k1;
 
-use std::collections::HashMap;
 use std::io::prelude::*;
 use std::io;
 use rand::thread_rng;
@@ -13,6 +13,44 @@ use mioco::tcp::{TcpStream};
 
 use etherust::rlpx::RlpxContext;
 use etherust::crypto::EncryptionContext;
+
+use rustcrypto::digest::Digest;
+use rustcrypto::sha3;
+use rustcrypto::{aes, aesni, hmac, blockmodes};
+use rustcrypto::symmetriccipher::BlockEncryptor;
+use rustcrypto::mac::Mac;
+
+
+fn update_mac<D: Digest, E: BlockEncryptor>(mac: &mut D, block: &E, seed: &[u8]) -> Vec<u8> {
+	let mut buf = vec![0u8; block.block_size()];
+	let mut macout = vec![0u8; mac.output_bytes()];
+
+	mac.result(&mut macout);
+
+	println!("macout: {:?}", &macout);
+
+	block.encrypt_block(&macout, &mut buf);
+
+	println!("aesbuf: {:?}", &buf);
+
+	println!("seed: {:?}", &seed);
+
+	for i in 0..buf.len() {
+		buf[i] = buf[i] ^ seed[i];
+	}
+
+	println!("aesbuf2: {:?}", &buf);
+
+	mac.input(&buf);
+	mac.result(&mut macout);
+	mac.reset();
+
+	println!("sum2: {:?}", &macout);
+
+	macout.truncate(16);
+
+	macout
+}
 
 fn peer_handler(mut stream: TcpStream, secp: &secp256k1::Secp256k1, privkey: &secp256k1::key::SecretKey, rpubkey: &secp256k1::key::PublicKey) -> io::Result<()> {
 	let ctx = EncryptionContext {
@@ -31,7 +69,26 @@ fn peer_handler(mut stream: TcpStream, secp: &secp256k1::Secp256k1, privkey: &se
 
 	try!(stream.read_exact(&mut handshake_resp));
 
-	rlpx.auth_handshake_decode(&handshake_resp);
+	let mut secrets = rlpx.auth_handshake_decode(&handshake_resp, &auth_handshake);
+
+	println!("mac: {:?}", secrets.mac);
+	println!("aes: {:?}", secrets.aes_secret);
+
+	let mut proto_handshake = vec![0; 176];
+
+	try!(stream.read_exact(&mut proto_handshake));
+
+	println!("read: {:?}", &proto_handshake);
+
+	//let macc = aes::ecb_encryptor(aes::KeySize::KeySize128, &secrets.mac, blockmodes::NoPadding);
+	let macc = aesni::AesNiEncryptor::new(aes::KeySize::KeySize256, &secrets.mac);
+
+	let head = &proto_handshake[..16];
+	let head_mac = &proto_handshake[16..32];
+
+	let outmac = update_mac(&mut *secrets.ingress_mac, &macc, &head);
+
+	println!("outmac: {:?}, {:?}", outmac, head_mac);
 
 	Ok(())
 }
