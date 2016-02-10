@@ -21,31 +21,25 @@ use rustcrypto::symmetriccipher::BlockEncryptor;
 use rustcrypto::mac::Mac;
 
 
-fn update_mac<D: Digest, E: BlockEncryptor>(mac: &mut D, block: &E, seed: &[u8]) -> Vec<u8> {
+#[inline]
+fn bytes_to_u24(arg: &[u8]) -> u32 {
+	((arg[0] as u32) << 16) + ((arg[1] as u32) << 8) + (arg[2] as u32)
+}
+
+fn update_mac<D: Digest + Clone, E: BlockEncryptor>(mac: &mut D, block: &E, seed: &[u8]) -> Vec<u8> {
 	let mut buf = vec![0u8; block.block_size()];
 	let mut macout = vec![0u8; mac.output_bytes()];
 
-	mac.result(&mut macout);
-
-	println!("macout: {:?}", &macout);
+	mac.clone().result(&mut macout);
 
 	block.encrypt_block(&macout, &mut buf);
-
-	println!("aesbuf: {:?}", &buf);
-
-	println!("seed: {:?}", &seed);
 
 	for i in 0..buf.len() {
 		buf[i] = buf[i] ^ seed[i];
 	}
 
-	println!("aesbuf2: {:?}", &buf);
-
 	mac.input(&buf);
-	mac.result(&mut macout);
-	mac.reset();
-
-	println!("sum2: {:?}", &macout);
+	mac.clone().result(&mut macout);
 
 	macout.truncate(16);
 
@@ -74,13 +68,12 @@ fn peer_handler(mut stream: TcpStream, secp: &secp256k1::Secp256k1, privkey: &se
 	println!("mac: {:?}", secrets.mac);
 	println!("aes: {:?}", secrets.aes_secret);
 
-	let mut proto_handshake = vec![0; 176];
+	let mut proto_handshake = vec![0; 32];
 
 	try!(stream.read_exact(&mut proto_handshake));
 
 	println!("read: {:?}", &proto_handshake);
 
-	//let macc = aes::ecb_encryptor(aes::KeySize::KeySize128, &secrets.mac, blockmodes::NoPadding);
 	let macc = aesni::AesNiEncryptor::new(aes::KeySize::KeySize256, &secrets.mac);
 
 	let head = &proto_handshake[..16];
@@ -88,7 +81,45 @@ fn peer_handler(mut stream: TcpStream, secp: &secp256k1::Secp256k1, privkey: &se
 
 	let outmac = update_mac(&mut *secrets.ingress_mac, &macc, &head);
 
+	// check equality
 	println!("outmac: {:?}, {:?}", outmac, head_mac);
+
+	let mut aes = aes::ctr(aes::KeySize::KeySize256, &secrets.aes_secret, &[0u8; 16]);
+
+	let mut result = vec![0u8; 16];
+
+	aes.process(head, &mut result);
+
+	println!("dec: {:?}", result);
+
+	let fsize = bytes_to_u24(&result[..3]) as usize;
+
+	let mut rsize = fsize;
+
+	if fsize % 16 != 0 {
+		rsize += 16 - fsize % 16;
+	}
+
+	let mut buf = vec![0u8; rsize + 16];
+
+	try!(stream.read_exact(&mut buf));
+
+	secrets.ingress_mac.input(&buf[..rsize]);
+
+	let mut fmacseed = [0u8; 16];
+	secrets.ingress_mac.clone().result(&mut fmacseed);
+
+	println!("buf: {:?}", buf);
+
+	let outmac = update_mac(&mut *secrets.ingress_mac, &macc, &fmacseed);
+
+	println!("outmac: {:?}, {:?}", outmac, &buf[rsize..]);
+
+	let mut result = vec![0u8; rsize];
+
+	aes.process(&buf[..rsize], &mut result);
+
+	println!("MSG: {:?}", &result);
 
 	Ok(())
 }
